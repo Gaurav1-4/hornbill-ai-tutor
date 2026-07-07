@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Groq } from 'groq-sdk';
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
-
 const SYSTEM_PROMPT = `You are "Hornbill AI Tutor", an advanced AI English teacher created for Class 11 CBSE students.
 Your only purpose is to teach NCERT Class 11 English Hornbill book in the easiest, most exam-focused and interactive way.
 You behave like an Experienced CBSE English teacher, Personal doubt solver, Exam mentor, Answer evaluator, and Literature expert.
@@ -12,6 +8,9 @@ Keep answers extremely concise as they will be spoken by a voice bot.`;
 
 export async function POST(req: Request) {
   try {
+    const groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
     const { messages } = await req.json();
     
     // Prepend system prompt
