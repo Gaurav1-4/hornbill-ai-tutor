@@ -59,8 +59,11 @@ export default function VoiceChat() {
     const loadVoices = () => {
       const availableVoices = window.speechSynthesis.getVoices();
       setVoices(availableVoices);
-      // Try to find a good default English voice
-      const defaultVoice = availableVoices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.lang === 'en-US');
+      // Try to find Neerja, then fallback to Indian English, then standard defaults
+      const defaultVoice = availableVoices.find(v => v.name.toLowerCase().includes('neerja')) 
+        || availableVoices.find(v => v.lang === 'en-IN')
+        || availableVoices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.lang === 'en-US');
+      
       if (defaultVoice) {
         setSelectedVoice(defaultVoice.name);
       } else if (availableVoices.length > 0) {
