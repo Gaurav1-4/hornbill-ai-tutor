@@ -13,11 +13,11 @@ export default function VoiceChat() {
   const [inputText, setInputText] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState<string>('');
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   
   const recognitionRef = useRef<any>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     // Fetch initial chat history
@@ -36,7 +36,7 @@ export default function VoiceChat() {
     };
     fetchHistory();
 
-    // Initialize Web Speech API
+    // Initialize Web Speech API for voice INPUT (speech recognition)
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       recognitionRef.current = new SpeechRecognition();
@@ -54,27 +54,6 @@ export default function VoiceChat() {
         setIsListening(false);
       };
     }
-
-    // Load available voices
-    const loadVoices = () => {
-      const availableVoices = window.speechSynthesis.getVoices();
-      setVoices(availableVoices);
-      // Try to find Neerja, then fallback to Indian English, then standard defaults
-      const defaultVoice = availableVoices.find(v => v.name.toLowerCase().includes('neerja')) 
-        || availableVoices.find(v => v.lang === 'en-IN')
-        || availableVoices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.lang === 'en-US');
-      
-      if (defaultVoice) {
-        setSelectedVoice(defaultVoice.name);
-      } else if (availableVoices.length > 0) {
-        setSelectedVoice(availableVoices[0].name);
-      }
-    };
-    
-    loadVoices();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
   }, []);
 
   // Auto scroll to bottom
@@ -89,6 +68,11 @@ export default function VoiceChat() {
       recognitionRef.current?.stop();
       setIsListening(false);
     } else {
+      // Stop any audio before listening
+      if (audioRef.current) {
+        audioRef.current.pause();
+        setIsPlayingAudio(false);
+      }
       recognitionRef.current?.start();
       setIsListening(true);
     }
@@ -98,6 +82,12 @@ export default function VoiceChat() {
     const newMsg: Message = { role: 'user', content: text };
     setMessages(prev => [...prev, newMsg]);
     setIsThinking(true);
+    
+    // Stop any current playing audio
+    if (audioRef.current) {
+        audioRef.current.pause();
+        setIsPlayingAudio(false);
+    }
     
     try {
       const res = await fetch('/api/chat', {
@@ -109,6 +99,8 @@ export default function VoiceChat() {
       
       const assistantMsg: Message = { role: 'assistant', content: data.text };
       setMessages(prev => [...prev, assistantMsg]);
+      
+      // Speak response using backend TTS
       speakResponse(data.text);
     } catch (err) {
       console.error(err);
@@ -117,18 +109,35 @@ export default function VoiceChat() {
     }
   };
 
-  const speakResponse = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Stop any current speech
-      const utterance = new SpeechSynthesisUtterance(text);
+  const speakResponse = async (text: string) => {
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
       
-      const voice = voices.find(v => v.name === selectedVoice);
-      if (voice) {
-        utterance.voice = voice;
+      if (!res.ok) throw new Error('Failed to generate speech');
+      
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      if (audioRef.current) {
+        audioRef.current.pause();
       }
       
-      utterance.rate = 1.0;
-      window.speechSynthesis.speak(utterance);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      audio.onplay = () => setIsPlayingAudio(true);
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      await audio.play();
+    } catch (err) {
+      console.error('Error playing TTS audio:', err);
     }
   };
 
@@ -144,8 +153,8 @@ export default function VoiceChat() {
       {/* Top Logo and text */}
       <div className="flex flex-col items-center space-y-4 shrink-0">
         <div className="relative flex items-center justify-center w-16 h-16">
-          <div className="absolute w-16 h-16 bg-blue-500 rounded-full opacity-20 blur-lg"></div>
-          <div className="absolute w-10 h-10 rounded-full border-[6px] border-blue-500"></div>
+          <div className={`absolute w-16 h-16 bg-blue-500 rounded-full blur-lg transition-all ${isPlayingAudio ? 'opacity-40 animate-pulse' : 'opacity-20'}`}></div>
+          <div className={`absolute w-10 h-10 rounded-full border-[6px] border-blue-500 transition-all ${isPlayingAudio ? 'scale-110' : ''}`}></div>
         </div>
         {messages.length === 0 && (
           <div className="text-center space-y-2">
@@ -155,19 +164,10 @@ export default function VoiceChat() {
         )}
       </div>
 
-      {/* Voice Selection */}
-      <div className="shrink-0 flex items-center gap-2 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-full text-xs text-gray-600 shadow-sm">
+      {/* Voice Configuration Note */}
+      <div className="shrink-0 flex items-center gap-2 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-full text-xs text-blue-600 shadow-sm">
         <Volume2 className="w-3.5 h-3.5" />
-        <span>Voice:</span>
-        <select 
-          value={selectedVoice} 
-          onChange={(e) => setSelectedVoice(e.target.value)}
-          className="bg-transparent outline-none border-none cursor-pointer max-w-[150px] truncate"
-        >
-          {voices.filter(v => v.lang.startsWith('en')).map(v => (
-            <option key={v.name} value={v.name}>{v.name}</option>
-          ))}
-        </select>
+        <span>Neural Voice Active: Neerja (English - India)</span>
       </div>
 
       {/* Response Area (Scrollable) */}
